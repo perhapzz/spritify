@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from typing import Optional
 import uuid
 import os
-import asyncio
 import logging
 import traceback
 from PIL import Image as PILImage
@@ -61,6 +60,7 @@ async def generate_sprite(
     frame_count: int = 8,
     frame_size: int = 128,
     mode: str = "ai",  # "ai" (new pipeline) | "classic" (AnimatedDrawings)
+    turnaround_id: Optional[str] = None,  # reuse cached turnaround
 ):
     """
     Upload an image and generate a sprite sheet with the specified motion.
@@ -124,18 +124,32 @@ async def generate_sprite(
             else:
                 provider = MockProvider()
 
-            # Step 1: Generate turnaround views (30%)
+            # Step 1: Generate turnaround views (30%) — or reuse cached
             turnaround_svc = TurnaroundService(
                 api_token=settings.replicate_api_token,
                 provider=settings.ai_provider,
             )
             tasks[task_id].progress = 30
-            logger.info(f"[AI] Step 1/3: Generating turnaround views")
 
-            turnaround = await turnaround_svc.generate_views(input_path)
-            turnaround_views = turnaround["views"]
+            if turnaround_id:
+                # Try to reuse cached turnaround
+                from pathlib import Path as _P
+                cache_dir = _P("static/turnarounds") / turnaround_id
+                cached = turnaround_svc._check_cache(cache_dir)
+                if cached:
+                    turnaround_views = cached
+                    logger.info(f"[AI] Reusing cached turnaround: {turnaround_id}")
+                else:
+                    logger.info(f"[AI] Cache miss for {turnaround_id}, regenerating")
+                    turnaround = await turnaround_svc.generate_views(input_path)
+                    turnaround_views = turnaround["views"]
+            else:
+                logger.info(f"[AI] Step 1/3: Generating turnaround views")
+                turnaround = await turnaround_svc.generate_views(input_path)
+                turnaround_views = turnaround["views"]
+
             tasks[task_id].turnaround = turnaround_views
-            logger.info(f"[AI] Turnaround done ({turnaround_svc.provider_name})")
+            logger.info(f"[AI] Turnaround ready")
 
             # Step 2: Generate pose-conditioned frames (50% → 80%)
             tasks[task_id].progress = 50

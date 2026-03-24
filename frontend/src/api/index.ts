@@ -49,7 +49,8 @@ export const generateSprite = async (
   motionId: string,
   frameCount: number = 8,
   frameSize: number = 128,
-  mode: Mode = 'ai'
+  mode: Mode = 'ai',
+  turnaroundId?: string
 ): Promise<TaskStatus> => {
   const formData = new FormData();
   formData.append('image', image);
@@ -57,6 +58,9 @@ export const generateSprite = async (
   formData.append('frame_count', frameCount.toString());
   formData.append('frame_size', frameSize.toString());
   formData.append('mode', mode);
+  if (turnaroundId) {
+    formData.append('turnaround_id', turnaroundId);
+  }
 
   const response = await api.post('/generate', formData, { timeout: 120000 });
   return response.data;

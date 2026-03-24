@@ -1,32 +1,17 @@
 services:
-  torchserve:
-    build:
-      context: ./animated_drawings_lib/torchserve
-      dockerfile: Dockerfile
-    platform: linux/amd64
-    ports:
-      - "8080:8080"   # inference
-      - "8081:8081"   # management
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     volumes:
       - ./backend/static:/app/static
-      - ./backend/motion_data:/app/motion_data
+      - ./backend/pose_data:/app/pose_data
     environment:
-      - DEBUG=true
-      - TORCHSERVE_URL=http://torchserve:8080
-    depends_on:
-      - torchserve
+      - DEBUG=false
+      - AI_PROVIDER=mock
+      # Set REPLICATE_API_TOKEN to enable AI mode:
+      # - REPLICATE_API_TOKEN=r8_xxx
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
@@ -34,3 +19,4 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    restart: unless-stopped

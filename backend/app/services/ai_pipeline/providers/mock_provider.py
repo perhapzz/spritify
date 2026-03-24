@@ -5,7 +5,7 @@ can be tested end-to-end without any API key.
 import asyncio
 import math
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,81 +1,107 @@
-# Task: Sprint 3 — Frontend Upgrade
+# Task: Sprint 4 — Polish, Testing & Deployment
 
 Priority: P0 | Status: PENDING
 
 ## Context
-Sprint 1 (AI 管线骨架) 和 Sprint 2 (动作帧生成) 后端都已完成。现在升级前端，匹配新的 AI-first 流程。
+Sprint 1-3 全部完成。后端 AI 管线 + 前端升级都已就位。最后一个 Sprint：打磨、测试、确保可部署。
 
-## 新用户流程
-```
-上传图片 → [AI 生成三视图] → 预览三视图 → 选择动作 → [AI 生成动作帧] → 预览精灵表 → 下载
-```
+## Task 1: 端到端测试 & Bug 修复
 
-## Task 1: 新增三视图预览步骤
+启动前后端，完整测试两个模式：
 
-新增组件 `frontend/src/components/TurnaroundPreview.tsx`:
-- 上传图片后，自动调用 `POST /api/v1/turnaround` 
-- 展示 3 张视图（正面/侧面/背面）并排显示
-- "确认" 按钮进入下一步；"重新生成" 按钮可重试
-- Loading 状态 + 错误处理
-
-修改 `App.tsx` 流程:
-```
-Step 1: Upload → Step 2: Turnaround Preview (NEW) → Step 3: Select Motion → Step 4: Settings → Generate
-```
-
-## Task 2: 模式切换 UI
-
-新增组件 `frontend/src/components/ModeSelector.tsx`:
-- 两个模式卡片: "AI HD" 和 "Classic"
-- AI HD: "高质量，AI 生成多视角，保证角色一致性" + ⚡ 标记
-- Classic: "快速模式，骨骼变形动画" + 🚀 标记
-- 放在上传之前或之后都行，看你觉得哪个 UX 更好
-
-API 层修改 `frontend/src/api/index.ts`:
-- `generateSprite()` 新增 `mode` 参数
-- 新增 `generateTurnaround(image: File)` 函数
-- 新增 `TurnaroundResult` 类型
-
-## Task 3: 多步骤进度条
-
-重构 `GenerationProgress.tsx`:
-- AI 模式下显示多步骤进度:
-  - Step 1/3: 生成三视图... (10-30%)
-  - Step 2/3: 生成动作帧... (30-80%)
-  - Step 3/3: 合成精灵表... (80-100%)
-- Classic 模式保持原有单步进度
-- 每个步骤有小图标或文字标记
-
-## Task 4: GIF 下载选项
-
-修改结果展示区域:
-- 下载按钮改为两个: "下载 PNG Sprite Sheet" + "下载 GIF 动画"
-- GIF 下载需要后端新增端点（或者前端用 canvas 生成 GIF — 用 gif.js 库）
-- 如果后端做：新增 `GET /api/v1/download/{task_id}?format=gif`
-- 如果前端做：用现有 sprite sheet + canvas 合成 GIF
-
-**推荐前端做** — 用 `gif.js` 或类似库，省一次 API 调用：
+**后端启动：**
 ```bash
-cd frontend && npm install gif.js
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
 
-## Task 5: UI 打磨
+**前端启动：**
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- 页面标题区域加 logo/icon（可以用 emoji 🎮 或简单 SVG）
-- 上传区域：如果是 AI 模式，提示 "上传角色正面图效果最佳"
-- 动画预览：加播放速度控制（慢/正常/快）
-- 响应式布局检查（移动端能用）
+**测试清单：**
+- [ ] AI 模式：上传图片 → 三视图预览 → 选动作 → 生成精灵表 → 预览动画 → 下载 PNG → 下载 GIF
+- [ ] Classic 模式：上传图片 → 选动作 → 生成 → 下载
+- [ ] 模式切换：在 AI 和 Classic 之间切换，状态正确重置
+- [ ] 错误处理：上传非图片文件、超大文件、无效格式
+- [ ] "Create Another" 重置流程正常
+- [ ] 移动端布局（缩小浏览器窗口测试）
+- [ ] API 返回错误时前端显示友好信息
 
-## 技术要求
-- 保持 React 19 + TypeScript + TailwindCSS
-- 不引入新的状态管理库（useState/useEffect 够用）
-- 组件拆分合理，不要把所有逻辑塞在 App.tsx
+修复发现的所有 bug。
+
+## Task 2: 三视图缓存
+
+实现三视图缓存机制，同一张图片不同动作复用三视图：
+
+**后端 `backend/app/services/ai_pipeline/turnaround.py`：**
+- 用图片内容的 hash (md5/sha256) 作为缓存 key
+- 三视图保存到 `static/turnarounds/{hash}/` 目录
+- 生成前检查缓存，命中则直接返回
+- 新增端点或参数：`turnaround_id` 可传入 generate 跳过重复生成
+
+**前端：**
+- 如果用户选了不同动作但没换图片，复用已有的三视图（不重新调 turnaround API）
+- 在 App.tsx 中用 state 记住 turnaround 结果
+
+## Task 3: Docker Compose 更新
+
+更新 `docker-compose.yml` 使整个项目可一键启动：
+
+```yaml
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/static:/app/static
+    environment:
+      - AI_PROVIDER=mock  # 默认 mock 模式
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+```
+
+- 移除 torchserve 服务（不再是核心依赖）
+- 确保 Dockerfile 都能正常 build
+- 测试 `docker-compose up` 能跑通
+
+## Task 4: README 更新
+
+重写 `README.md` 反映新架构：
+- 项目介绍（AI-first sprite sheet 生成）
+- 两种模式说明（AI HD / Classic）
+- 快速开始（本地开发 + Docker）
+- API 文档概要
+- 架构图（简单 ASCII）
+- 技术栈
+- 移除过时的 Azure 部署内容（不是当前重点）
+
+## Task 5: 代码清理
+
+- 移除未使用的 import
+- 统一日志格式（用 logger 不用 print）
+- 确保所有 async 函数正确使用 await
+- `requirements.txt` 检查：移除不需要的依赖，确认版本
+- `package.json` 检查：确认依赖都用到了
+- 前端 `npm run build` + `npm run lint` 无报错
+- 后端 typing 检查（基本的 type hint）
 
 ## Acceptance Criteria
-- [ ] AI 模式：上传 → 三视图预览 → 选动作 → 生成 → 下载，全流程走通
-- [ ] Classic 模式：上传 → 选动作 → 生成 → 下载，保持原有流程
-- [ ] 模式切换 UI 直观
-- [ ] 多步骤进度条反映真实状态
-- [ ] PNG + GIF 两种下载格式
-- [ ] 移动端可用
+- [ ] 两种模式端到端全流程无 bug
+- [ ] 三视图缓存生效（同图不同动作不重复生成）
+- [ ] `docker-compose up` 能正常启动
+- [ ] README 准确反映当前项目状态
+- [ ] 代码无明显 lint 问题
 - [ ] `npm run build` 无报错
+- [ ] `uvicorn app.main:app` 启动无报错
+- [ ] 最终提交推送到 GitHub

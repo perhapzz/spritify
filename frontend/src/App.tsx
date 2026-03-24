@@ -109,7 +109,8 @@ function App() {
         selectedMotion,
         frameCount,
         frameSize,
-        mode
+        mode,
+        turnaround?.turnaround_id
       );
       setTaskStatus(result);
       if (result.status === 'completed') {
