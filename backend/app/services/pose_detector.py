@@ -1,13 +1,28 @@
 """
 Pose Detection Service - Uses TorchServe (for drawn characters) or MediaPipe (for photos)
 """
-import cv2
-import numpy as np
+from __future__ import annotations
+
 from pathlib import Path
 import yaml
 import logging
-import requests
+try:
+    import requests
+except ImportError:
+    requests = None  # type: ignore
 import os
+from typing import Optional, Tuple, Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    import numpy as np
+from PIL import Image
+import io
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None  # type: ignore
+    np = None  # type: ignore
 from typing import Optional, Tuple
 from PIL import Image
 import io

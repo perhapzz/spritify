@@ -2,25 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (including Mesa for headless OpenGL rendering)
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
     libglib2.0-0 \
-    libosmesa6-dev \
-    libgl1-mesa-dev \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PYOPENGL_PLATFORM=osmesa
-
-# Copy requirements first for caching
-COPY requirements.txt .
+COPY requirements-docker.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY . .
 
-# Create directories
-RUN mkdir -p static/uploads static/outputs motion_data
+RUN mkdir -p static/uploads static/outputs static/turnarounds static/frames
 
 EXPOSE 8000
 
