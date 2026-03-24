@@ -1,42 +1,65 @@
-# Sprint 1 — Task 1 Status
+# Sprint 1 — Status
 
 **Status:** ✅ COMPLETED  
 **Date:** 2026-03-24
 
-## Changes Made
+---
 
-### 1. Fixed `jumping_jacks` retarget config ✅
-- Changed `cmu1_bvh.yaml` → `cmu1_pfp.yaml` (the file that actually exists)
+## Task 1: AI Pipeline Core ✅
 
-### 2. Wrapped blocking calls with `asyncio.to_thread()` ✅
-- `create_character_annotations()` — now runs in thread pool
-- `animated_drawings.render.start()` — now runs in thread pool
+### 1.1 Directory structure created
+```
+backend/app/services/ai_pipeline/
+├── __init__.py
+├── turnaround.py              # TurnaroundService
+├── pose_frames.py             # Placeholder for Sprint 2
+└── providers/
+    ├── __init__.py
+    ├── mock_provider.py       # Color-overlay mock (no API key)
+    └── replicate_provider.py  # Zero123++ via Replicate
+```
 
-### 3. Added input validation ✅
-- File size ≤ 10MB check
-- Image validity check (Pillow open)
-- Dimensions ≤ 4096×4096 check
-- Clear 400 errors with descriptive messages
+### 1.2 TurnaroundService
+- Auto-detects provider: Replicate if `REPLICATE_API_TOKEN` set, mock otherwise
+- Returns `turnaround_id` + view URLs (front/side/back)
+- Mock mode: tinted copies with FRONT/SIDE/BACK labels
 
-### 4. Mesa headless rendering ✅
-- Added `"view": {"USE_MESA": True}` to MVC config
-- Added `libosmesa6-dev`, `libgl1-mesa-dev` to Dockerfile
-- Set `PYOPENGL_PLATFORM=osmesa` env var in Dockerfile
+### 1.3 ReplicateProvider
+- Calls `stability-ai/zero123plus` model
+- Downloads 3×2 grid output, crops front/side/back cells
+- All blocking calls wrapped in `asyncio.to_thread()`
 
-### 5. Stopped silent fallback ✅
-- `generate_frames()` now raises `RuntimeError` on failure instead of silently returning placeholder bounce
-- Placeholder method kept but not auto-invoked
+### 1.4 `POST /api/v1/turnaround` endpoint
+- Input validation (size ≤10MB, dimensions ≤4096²)
+- Returns view paths
 
-### 6. Verified BVH paths ✅
-All BVH files confirmed to exist:
-- `examples/bvh/fair1/dab.bvh` ✓
-- `examples/bvh/fair1/jumping.bvh` ✓
-- `examples/bvh/fair1/wave_hello.bvh` ✓
-- `examples/bvh/fair1/zombie.bvh` ✓
-- `examples/bvh/cmu1/jumping_jacks.bvh` ✓
-- `examples/bvh/rokoko/jesse_dance.bvh` ✓
+### 1.5 Config updated
+- `replicate_api_token` (env: `REPLICATE_API_TOKEN`)
+- `ai_provider` ("replicate" | "mock" | "auto")
 
-## Files Modified
-- `backend/app/services/animator.py`
-- `backend/app/api/generation.py`
-- `backend/Dockerfile`
+---
+
+## Task 2: Generate endpoint refactored ✅
+- `POST /api/v1/generate` now accepts `mode` param: `"ai"` (default) or `"classic"`
+- `mode=ai`: runs TurnaroundService, returns view URLs
+- `mode=classic`: runs AnimatedDrawings pipeline (existing behavior)
+- `GenerationStatus` model has new `turnaround` field for AI mode
+
+---
+
+## Task 3: AD bug fixes ✅ (done in previous commit)
+- `jumping_jacks` retarget: `cmu1_bvh.yaml` → `cmu1_pfp.yaml`
+- Blocking calls wrapped with `asyncio.to_thread()`
+- Input validation added
+- Silent fallback removed
+- Mesa headless configured in Dockerfile
+
+---
+
+## Files Modified/Created
+- `backend/app/services/ai_pipeline/` (new directory, 6 files)
+- `backend/app/api/turnaround.py` (new)
+- `backend/app/api/generation.py` (refactored)
+- `backend/app/config.py` (AI settings added)
+- `backend/app/main.py` (turnaround router registered)
+- `backend/requirements.txt` (replicate added)

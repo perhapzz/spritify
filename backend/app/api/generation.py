@@ -11,6 +11,8 @@ from PIL import Image as PILImage
 
 from app.services.animator import AnimatorService
 from app.services.sprite_sheet import SpriteSheetService
+from app.services.ai_pipeline import TurnaroundService
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,6 +39,7 @@ class GenerationStatus(BaseModel):
     status: str  # pending, processing, completed, failed
     progress: Optional[int] = None
     result_url: Optional[str] = None
+    turnaround: Optional[dict] = None  # AI mode: view URLs
     error: Optional[str] = None
 
 
@@ -50,6 +53,7 @@ async def generate_sprite(
     motion_id: str = "dab",
     frame_count: int = 8,
     frame_size: int = 128,
+    mode: str = "ai",  # "ai" (new pipeline) | "classic" (AnimatedDrawings)
 ):
     """
     Upload an image and generate a sprite sheet with the specified motion.
@@ -100,42 +104,60 @@ async def generate_sprite(
     )
 
     try:
-        # Initialize services
-        animator = AnimatorService()
-        sprite_service = SpriteSheetService()
+        if mode == "ai":
+            # --- AI Pipeline: generate turnaround views ---
+            turnaround_svc = TurnaroundService(
+                api_token=settings.replicate_api_token,
+                provider=settings.ai_provider,
+            )
+            tasks[task_id].progress = 30
+            logger.info(f"[AI mode] Generating turnaround views for task {task_id}")
 
-        # Generate animation frames
-        tasks[task_id].progress = 30
-        logger.info(f"Generating frames for task {task_id}")
+            turnaround = await turnaround_svc.generate_views(input_path)
 
-        frames = await animator.generate_frames(
-            input_path=input_path,
-            motion_id=motion_id,
-            frame_count=frame_count,
-        )
+            logger.info(f"Turnaround views generated ({turnaround_svc.provider_name}): {list(turnaround['views'].keys())}")
+            tasks[task_id].progress = 70
 
-        logger.info(f"Generated {len(frames)} frames")
-        tasks[task_id].progress = 70
+            # For Sprint 1: return turnaround views as the result
+            # Sprint 2 will add pose-conditioned frame generation here
+            tasks[task_id].progress = 100
+            tasks[task_id].status = "completed"
+            tasks[task_id].result_url = None  # no sprite sheet yet in AI mode
+            tasks[task_id].turnaround = turnaround["views"]
 
-        # Create sprite sheet
-        output_dir = "static/outputs"
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = f"{output_dir}/{task_id}_sprite.png"
+        else:
+            # --- Classic mode: AnimatedDrawings ---
+            animator = AnimatorService()
+            sprite_service = SpriteSheetService()
 
-        await sprite_service.create_sprite_sheet(
-            frames=frames,
-            output_path=output_path,
-            frame_size=frame_size,
-        )
+            tasks[task_id].progress = 30
+            logger.info(f"[Classic mode] Generating frames for task {task_id}")
 
-        logger.info(f"Sprite sheet saved to {output_path}")
+            frames = await animator.generate_frames(
+                input_path=input_path,
+                motion_id=motion_id,
+                frame_count=frame_count,
+            )
 
-        tasks[task_id].progress = 100
-        tasks[task_id].status = "completed"
-        tasks[task_id].result_url = f"/static/outputs/{task_id}_sprite.png"
+            logger.info(f"Generated {len(frames)} frames")
+            tasks[task_id].progress = 70
 
-        # Clean up temp files
-        animator.cleanup()
+            output_dir = "static/outputs"
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = f"{output_dir}/{task_id}_sprite.png"
+
+            await sprite_service.create_sprite_sheet(
+                frames=frames,
+                output_path=output_path,
+                frame_size=frame_size,
+            )
+
+            logger.info(f"Sprite sheet saved to {output_path}")
+            tasks[task_id].progress = 100
+            tasks[task_id].status = "completed"
+            tasks[task_id].result_url = f"/static/outputs/{task_id}_sprite.png"
+
+            animator.cleanup()
 
     except Exception as e:
         logger.error(f"Error generating sprite: {e}")

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # Use local storage if Azure not configured
     use_local_storage: bool = True
 
+    # AI Pipeline
+    replicate_api_token: Optional[str] = None  # env: REPLICATE_API_TOKEN
+    ai_provider: str = "auto"  # "replicate" | "mock" | "auto"
+
     # CORS
     allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
-from app.api import generation
+from app.api import generation, turnaround
 
 app = FastAPI(
     title="Spritify API",
@@ -23,10 +23,12 @@ app.add_middleware(
 # Static files
 os.makedirs("static/uploads", exist_ok=True)
 os.makedirs("static/outputs", exist_ok=True)
+os.makedirs("static/turnarounds", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Routes
 app.include_router(generation.router, prefix="/api/v1", tags=["generation"])
+app.include_router(turnaround.router, prefix="/api/v1", tags=["turnaround"])
 
 
 @app.get("/")
