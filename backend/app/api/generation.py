@@ -11,7 +11,9 @@ from PIL import Image as PILImage
 
 from app.services.animator import AnimatorService
 from app.services.sprite_sheet import SpriteSheetService
-from app.services.ai_pipeline import TurnaroundService
+from app.services.ai_pipeline import TurnaroundService, PoseFrameService
+from app.services.ai_pipeline.providers.mock_provider import MockProvider
+from app.services.ai_pipeline.providers.replicate_provider import ReplicateProvider
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -22,10 +24,15 @@ MAX_DIMENSION = 4096
 
 
 @router.get("/motions")
-async def list_motions():
+async def list_motions(mode: str = "ai"):
     """List all available motion presets"""
-    animator = AnimatorService()
-    return {"motions": animator.get_available_motions()}
+    if mode == "classic":
+        animator = AnimatorService()
+        return {"motions": animator.get_available_motions(), "mode": "classic"}
+    else:
+        from app.services.pose_library import PoseLibrary
+        lib = PoseLibrary()
+        return {"motions": lib.list_motions(), "mode": "ai"}
 
 
 class GenerationRequest(BaseModel):
@@ -105,25 +112,71 @@ async def generate_sprite(
 
     try:
         if mode == "ai":
-            # --- AI Pipeline: generate turnaround views ---
+            # --- AI Pipeline: turnaround → pose frames → sprite sheet ---
+
+            # Resolve provider
+            provider_name = settings.ai_provider
+            if provider_name == "auto":
+                provider_name = "replicate" if settings.replicate_api_token else "mock"
+
+            if provider_name == "replicate":
+                provider = ReplicateProvider(settings.replicate_api_token)
+            else:
+                provider = MockProvider()
+
+            # Step 1: Generate turnaround views (30%)
             turnaround_svc = TurnaroundService(
                 api_token=settings.replicate_api_token,
                 provider=settings.ai_provider,
             )
             tasks[task_id].progress = 30
-            logger.info(f"[AI mode] Generating turnaround views for task {task_id}")
+            logger.info(f"[AI] Step 1/3: Generating turnaround views")
 
             turnaround = await turnaround_svc.generate_views(input_path)
+            turnaround_views = turnaround["views"]
+            tasks[task_id].turnaround = turnaround_views
+            logger.info(f"[AI] Turnaround done ({turnaround_svc.provider_name})")
 
-            logger.info(f"Turnaround views generated ({turnaround_svc.provider_name}): {list(turnaround['views'].keys())}")
-            tasks[task_id].progress = 70
+            # Step 2: Generate pose-conditioned frames (50% → 80%)
+            tasks[task_id].progress = 50
+            logger.info(f"[AI] Step 2/3: Generating {frame_count} pose frames for '{motion_id}'")
 
-            # For Sprint 1: return turnaround views as the result
-            # Sprint 2 will add pose-conditioned frame generation here
+            # Resolve view paths to absolute
+            from pathlib import Path as _Path
+            abs_views = {}
+            for k, v in turnaround_views.items():
+                p = v.lstrip("/")
+                abs_views[k] = str(_Path(p).resolve()) if _Path(p).exists() else p
+
+            pose_svc = PoseFrameService(provider=provider)
+            frame_paths = await pose_svc.generate_frames(
+                turnaround_views=abs_views,
+                motion_id=motion_id,
+                frame_count=frame_count,
+                frame_size=frame_size,
+            )
+            tasks[task_id].progress = 80
+            logger.info(f"[AI] Generated {len(frame_paths)} frames")
+
+            # Step 3: Compose sprite sheet (80% → 100%)
+            from PIL import Image as _PILImg
+            frames = [_PILImg.open(p).convert("RGBA") for p in frame_paths]
+
+            sprite_service = SpriteSheetService()
+            output_dir = "static/outputs"
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = f"{output_dir}/{task_id}_sprite.png"
+
+            await sprite_service.create_sprite_sheet(
+                frames=frames,
+                output_path=output_path,
+                frame_size=frame_size,
+            )
+
             tasks[task_id].progress = 100
             tasks[task_id].status = "completed"
-            tasks[task_id].result_url = None  # no sprite sheet yet in AI mode
-            tasks[task_id].turnaround = turnaround["views"]
+            tasks[task_id].result_url = f"/static/outputs/{task_id}_sprite.png"
+            logger.info(f"[AI] Sprite sheet saved: {output_path}")
 
         else:
             # --- Classic mode: AnimatedDrawings ---

@@ -81,3 +81,51 @@ class ReplicateProvider:
             logger.info(f"Cropped view: {view_name} from grid ({col},{row}) → {path}")
 
         return results
+
+    async def generate_pose_frame(
+        self,
+        reference_image: str,
+        pose_image: str,
+        output_path: str,
+        frame_size: int = 128,
+    ) -> None:
+        """
+        Generate a single pose-conditioned frame using ControlNet + IP-Adapter on Replicate.
+        """
+        import replicate
+
+        client = replicate.Client(api_token=self.api_token)
+
+        output_url = await asyncio.to_thread(
+            self._run_controlnet, client, reference_image, pose_image
+        )
+
+        # Download result
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(output_url, timeout=60)
+            resp.raise_for_status()
+
+        # Resize and save
+        from io import BytesIO
+        img = Image.open(BytesIO(resp.content)).convert("RGBA")
+        img = img.resize((frame_size, frame_size), Image.Resampling.LANCZOS)
+        img.save(output_path)
+
+    def _run_controlnet(self, client, reference_image: str, pose_image: str) -> str:
+        with open(reference_image, "rb") as ref_f, open(pose_image, "rb") as pose_f:
+            output = client.run(
+                "zsxkib/ip-adapter-sdxl",
+                input={
+                    "image": ref_f,
+                    "control_image": pose_f,
+                    "prompt": "game character sprite, pixel art style, transparent background",
+                    "negative_prompt": "blurry, low quality, watermark",
+                    "ip_adapter_scale": 0.7,
+                    "controlnet_conditioning_scale": 0.8,
+                    "num_inference_steps": 30,
+                },
+            )
+        # output is typically a list of URLs
+        if isinstance(output, list):
+            return str(output[0])
+        return str(output)

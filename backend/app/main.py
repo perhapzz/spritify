@@ -24,6 +24,7 @@ app.add_middleware(
 os.makedirs("static/uploads", exist_ok=True)
 os.makedirs("static/outputs", exist_ok=True)
 os.makedirs("static/turnarounds", exist_ok=True)
+os.makedirs("static/frames", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Routes

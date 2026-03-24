@@ -1,133 +1,137 @@
-# Task: Sprint 1 — AI Pipeline Core (架构重定义)
+# Task: Sprint 2 — Pose-Conditioned Frame Generation
 
-Priority: P0 | Status: PENDING  
-**⚠️ 替代之前的 "Fix Backend Issues" 任务 — 方向已改**
+Priority: P0 | Status: PENDING
 
 ## Context
-Director 明确要求：AI 三视图生成是核心，不是修 AnimatedDrawings 的 bug。整个架构方向变了。
+Sprint 1 AI 管线骨架已完成（三视图生成服务 + Mock 模式）。现在搭建第二阶段：基于三视图 + OpenPose 生成动作帧。
 
-**新目标：** 搭建 AI-first 生成管线，用 Replicate API 从单张图片生成角色三视图。
+Token 不 block 开发 — 继续用 Mock 模式，所有接口和逻辑先跑通。
 
-## 前置条件
-- 需要 **Replicate API Token** — 等 Director 提供，先把代码架构搭好，用 mock 测试
-- 如果有 token 就直接联调
+## Task 1: OpenPose 预置骨骼库
 
-## Task 1: 搭建 AI 管线骨架
+创建 `backend/pose_data/` 目录，存放预定义的 OpenPose JSON：
 
-### 1.1 安装依赖
-`backend/requirements.txt` 新增:
 ```
-replicate>=0.25.0
+pose_data/
+├── walk/          # 8 帧步行循环
+│   ├── frame_0.json
+│   ├── frame_1.json
+│   └── ...
+├── run/           # 8 帧跑步循环
+├── idle/          # 4 帧待机呼吸
+└── jump/          # 8 帧跳跃
 ```
 
-### 1.2 创建 AI Pipeline Service
-创建 `backend/app/services/ai_pipeline/` 目录:
+每个 JSON 是标准 OpenPose 18-keypoint 格式：
+```json
+{
+  "people": [{
+    "pose_keypoints_2d": [x0, y0, c0, x1, y1, c1, ...]
+  }]
+}
+```
 
-**`__init__.py`**
+**获取方式：**
+- 可以从网上找现成的 OpenPose 序列数据
+- 或者手动定义关键帧坐标（走路/跑步这些动作模式很标准）
+- 也可以从现有 BVH 文件投影出 2D 关键点
 
-**`turnaround.py`** — 三视图生成服务:
+创建 `backend/app/services/pose_library.py`:
 ```python
-class TurnaroundService:
-    async def generate_views(self, image_path: str) -> dict:
+class PoseLibrary:
+    def get_pose_sequence(self, motion_id: str, frame_count: int) -> list[dict]:
+        """返回指定动作的 OpenPose 关键点序列"""
+        pass
+    
+    def list_motions(self) -> list[dict]:
+        """列出所有可用动作"""
+        pass
+```
+
+## Task 2: Pose-Conditioned Frame Generation Service
+
+实现 `backend/app/services/ai_pipeline/pose_frames.py`:
+
+```python
+class PoseFrameService:
+    async def generate_frames(
+        self,
+        turnaround_views: dict,  # {"front": path, "side": path, "back": path}
+        motion_id: str,
+        frame_count: int = 8,
+        frame_size: int = 128,
+    ) -> list[str]:
         """
-        从单张图片生成三视图 (front, side, back)
+        基于三视图 + OpenPose 生成动作帧
         
-        Returns: {
-            "front": "/path/to/front.png",
-            "side": "/path/to/side.png", 
-            "back": "/path/to/back.png"
-        }
+        流程:
+        1. 从 PoseLibrary 获取目标动作的骨骼序列
+        2. 对每一帧:
+           a. 根据帧的朝向角度，选择最匹配的三视图作为参考
+           b. 调用 ControlNet(OpenPose) + IP-Adapter 生成该帧
+           c. 去除背景
+        3. 返回帧图片路径列表
         """
-        # 调用 Replicate API
-        # 模型选项:
-        #   1. stability-ai/zero123plus (3D 风格)
-        #   2. SDXL + CharTurner LoRA (卡通风格)
-        # 
-        # 先实现 Zero123++ 作为默认
         pass
 ```
 
-**`providers/replicate_provider.py`** — Replicate API 封装:
+**Replicate API 调用设计（在 replicate_provider.py 中新增）：**
 ```python
-class ReplicateProvider:
-    def __init__(self, api_token: str):
-        self.client = replicate.Client(api_token=api_token)
-    
-    async def run_zero123plus(self, image_path: str) -> list[str]:
-        """运行 Zero123++ 模型，返回多视角图片 URL 列表"""
-        pass
-    
-    async def run_sdxl_turnaround(self, image_path: str, prompt: str) -> list[str]:
-        """运行 SDXL + CharTurner，返回三视图 URL 列表"""
-        pass
+async def run_controlnet_pose(
+    self,
+    reference_image: str,    # 三视图中最匹配的那张
+    pose_image: str,         # OpenPose 骨骼图
+    prompt: str,             # 角色描述
+    ip_adapter_scale: float = 0.7,
+) -> str:
+    """ControlNet + IP-Adapter 生成单帧"""
+    pass
 ```
 
-### 1.3 新增 API 端点
-**`backend/app/api/turnaround.py`** (新文件):
+**Mock 模式（在 mock_provider.py 中新增）：**
+- 对每帧：取三视图中的一张，根据 pose 做简单的色调/旋转变换
+- 目的是让前端和 API 逻辑能完整跑通
+
+## Task 3: 整合到 Generate 端点
+
+修改 `backend/app/api/generation.py` 的 `mode=ai` 路径：
+
 ```
-POST /api/v1/turnaround
-- 接收图片上传
-- 调用 TurnaroundService
-- 返回三视图 URL
-- 保存三视图到 static/turnarounds/
+完整 AI 生成流程:
+1. 上传图片 → 调用 TurnaroundService 生成三视图
+2. 三视图 → 调用 PoseFrameService 生成动作帧
+3. 动作帧 → 调用 SpriteSheetService 合成精灵表
+4. 返回结果
 ```
 
-### 1.4 配置更新
-**`backend/app/config.py`** 新增:
+进度更新要真实反映多步骤：
+- 10%: 上传完成
+- 30%: 三视图生成中
+- 50%: 三视图完成，动作帧生成中
+- 80%: 动作帧完成，合成精灵表
+- 100%: 完成
+
+## Task 4: OpenPose 骨骼渲染工具
+
+创建 `backend/app/services/ai_pipeline/pose_renderer.py`:
 ```python
-replicate_api_token: Optional[str] = None  # env: REPLICATE_API_TOKEN
-ai_provider: str = "replicate"             # or "mock" for testing
-```
-
-### 1.5 Mock 模式
-在没有 API token 时，`TurnaroundService` 应该有 mock 模式:
-- 复制原图 3 次，加不同的颜色 overlay 标记 (front=绿, side=蓝, back=红)
-- 这样前端和 API 层可以先跑通
-
-## Task 2: 重构 Generation API
-
-修改 `backend/app/api/generation.py`:
-- 新增 `mode` 参数: `"ai"` (default) | `"classic"`
-- `mode=ai`: 调用新 AI 管线
-- `mode=classic`: 调用现有 AnimatedDrawings（顺便修之前说的 bug）
-- AI 模式暂时只做到三视图（帧生成是 Sprint 2）
-
-## Task 3: 顺便修 AD 的关键 Bug
-
-在 `mode=classic` 路径中:
-- 修 `jumping_jacks` retarget 配置路径
-- 加 `asyncio.to_thread()` 包裹阻塞调用
-- 加基础输入验证
-
-这些是小改动，顺手做了。
-
-## 目录结构 (目标)
-```
-backend/app/services/
-├── ai_pipeline/
-│   ├── __init__.py
-│   ├── turnaround.py          # 三视图生成
-│   ├── pose_frames.py         # Sprint 2 — 先留空
-│   └── providers/
-│       ├── __init__.py
-│       ├── replicate_provider.py
-│       └── mock_provider.py   # 无 API key 时的 mock
-├── animator.py                # 保留 (classic mode)
-├── sprite_sheet.py            # 保留
-├── pose_detector.py           # 保留
-└── storage.py                 # 保留
+def render_pose_image(keypoints: list, width: int, height: int) -> Image:
+    """将 OpenPose 关键点渲染为骨骼图（黑底白线）"""
+    # 用 Pillow 画骨骼连线
+    # 这个图作为 ControlNet 的条件输入
+    pass
 ```
 
 ## Acceptance Criteria
-- [ ] `POST /api/v1/turnaround` 能接收图片，返回三视图（mock 或真实）
-- [ ] `POST /api/v1/generate` 支持 `mode=ai` 和 `mode=classic`
-- [ ] Mock 模式下全流程可跑通（无 API key）
-- [ ] 有 Replicate token 时能调通 Zero123++
-- [ ] AD 经典模式的 3 个关键 bug 已修
-- [ ] 代码结构清晰，新旧管线分离
-- [ ] `uvicorn app.main:app` 启动无报错
+- [ ] `pose_data/` 下有 walk/run/idle/jump 4 个动作的 OpenPose 序列
+- [ ] `PoseLibrary` 能返回动作骨骼序列
+- [ ] `PoseFrameService` 能基于三视图 + 骨骼生成帧（Mock 模式）
+- [ ] `POST /api/v1/generate` (mode=ai) 能完整走通：三视图 → 动作帧 → 精灵表
+- [ ] 进度更新反映真实多步骤状态
+- [ ] Mock 模式下全流程端到端可跑通
+- [ ] Replicate provider 中新增 `run_controlnet_pose` 方法（真实调用待 token）
 
 ## 参考
-- Replicate Zero123++ API: https://replicate.com/stability-ai/zero123plus
-- Replicate Python SDK: https://github.com/replicate/replicate-python
-- 完整架构设计: `.handoff/DECISIONS.md`
+- OpenPose 关键点格式: https://github.com/CMU-Perceptual-Computing-Lab/openpose/blob/master/doc/02_output.md
+- ControlNet OpenPose: Replicate 上搜 "controlnet openpose"
+- IP-Adapter: https://replicate.com/zsxkib/ip-adapter-sdxl

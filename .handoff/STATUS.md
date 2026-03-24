@@ -1,65 +1,70 @@
-# Sprint 1 — Status
+# Sprint 2 — Pose-Conditioned Frame Generation
 
 **Status:** ✅ COMPLETED  
 **Date:** 2026-03-24
 
 ---
 
-## Task 1: AI Pipeline Core ✅
+## Task 1: OpenPose Pose Library ✅
 
-### 1.1 Directory structure created
+### Pose data created
 ```
-backend/app/services/ai_pipeline/
-├── __init__.py
-├── turnaround.py              # TurnaroundService
-├── pose_frames.py             # Placeholder for Sprint 2
-└── providers/
-    ├── __init__.py
-    ├── mock_provider.py       # Color-overlay mock (no API key)
-    └── replicate_provider.py  # Zero123++ via Replicate
+backend/pose_data/
+├── walk/   (8 frames)
+├── run/    (8 frames)
+├── idle/   (4 frames)
+└── jump/   (8 frames)
 ```
+Each frame is standard OpenPose 18-keypoint JSON (normalized 0-1 coords).
 
-### 1.2 TurnaroundService
-- Auto-detects provider: Replicate if `REPLICATE_API_TOKEN` set, mock otherwise
-- Returns `turnaround_id` + view URLs (front/side/back)
-- Mock mode: tinted copies with FRONT/SIDE/BACK labels
-
-### 1.3 ReplicateProvider
-- Calls `stability-ai/zero123plus` model
-- Downloads 3×2 grid output, crops front/side/back cells
-- All blocking calls wrapped in `asyncio.to_thread()`
-
-### 1.4 `POST /api/v1/turnaround` endpoint
-- Input validation (size ≤10MB, dimensions ≤4096²)
-- Returns view paths
-
-### 1.5 Config updated
-- `replicate_api_token` (env: `REPLICATE_API_TOKEN`)
-- `ai_provider` ("replicate" | "mock" | "auto")
+### PoseLibrary service
+- `get_pose_sequence(motion_id, frame_count)` — loads + resamples frames
+- `list_motions()` — returns available motions with metadata
+- Generator script: `backend/generate_poses.py`
 
 ---
 
-## Task 2: Generate endpoint refactored ✅
-- `POST /api/v1/generate` now accepts `mode` param: `"ai"` (default) or `"classic"`
-- `mode=ai`: runs TurnaroundService, returns view URLs
-- `mode=classic`: runs AnimatedDrawings pipeline (existing behavior)
-- `GenerationStatus` model has new `turnaround` field for AI mode
+## Task 2: PoseFrameService ✅
+
+`backend/app/services/ai_pipeline/pose_frames.py`:
+- Takes turnaround views + motion_id → generates per-frame images
+- Selects reference view (front/side/back) based on frame position
+- Renders OpenPose skeleton → passes to provider
+- Mock: blends reference + pose overlay
+- Replicate: ControlNet + IP-Adapter (ready, awaiting token)
 
 ---
 
-## Task 3: AD bug fixes ✅ (done in previous commit)
-- `jumping_jacks` retarget: `cmu1_bvh.yaml` → `cmu1_pfp.yaml`
-- Blocking calls wrapped with `asyncio.to_thread()`
-- Input validation added
-- Silent fallback removed
-- Mesa headless configured in Dockerfile
+## Task 3: Generate Endpoint — Full AI Flow ✅
+
+`POST /api/v1/generate` (mode=ai) now does:
+1. **10%** Upload saved
+2. **30%** Turnaround views generated (TurnaroundService)
+3. **50%** Pose frames generating (PoseFrameService)
+4. **80%** Frames done, composing sprite sheet
+5. **100%** Sprite sheet ready → `result_url`
+
+`GET /api/v1/motions?mode=ai` returns pose library motions.
 
 ---
 
-## Files Modified/Created
-- `backend/app/services/ai_pipeline/` (new directory, 6 files)
-- `backend/app/api/turnaround.py` (new)
-- `backend/app/api/generation.py` (refactored)
-- `backend/app/config.py` (AI settings added)
-- `backend/app/main.py` (turnaround router registered)
-- `backend/requirements.txt` (replicate added)
+## Task 4: Pose Renderer ✅
+
+`backend/app/services/ai_pipeline/pose_renderer.py`:
+- Renders 18-keypoint skeleton as colored lines on black background
+- Standard OpenPose color scheme per limb
+- Output used as ControlNet conditioning input
+
+---
+
+## Files Created/Modified
+- `backend/pose_data/` — 28 JSON files (walk×8, run×8, idle×4, jump×8)
+- `backend/generate_poses.py` — pose sequence generator script
+- `backend/app/services/pose_library.py` (new)
+- `backend/app/services/ai_pipeline/pose_frames.py` (implemented)
+- `backend/app/services/ai_pipeline/pose_renderer.py` (new)
+- `backend/app/services/ai_pipeline/providers/mock_provider.py` (added generate_pose_frame)
+- `backend/app/services/ai_pipeline/providers/replicate_provider.py` (added generate_pose_frame)
+- `backend/app/services/ai_pipeline/__init__.py` (exports PoseFrameService)
+- `backend/app/api/generation.py` (full AI pipeline flow)
+- `backend/app/main.py` (static/frames dir)
