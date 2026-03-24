@@ -4,15 +4,23 @@ const api = axios.create({
   baseURL: '/api/v1',
 });
 
+export type Mode = 'ai' | 'classic';
+
 export interface Motion {
   id: string;
   name: string;
   description: string;
+  frame_count?: number;
 }
 
-export interface GenerationResponse {
-  task_id: string;
-  status: string;
+export interface TurnaroundResult {
+  turnaround_id: string;
+  provider: string;
+  views: {
+    front: string;
+    side: string;
+    back: string;
+  };
 }
 
 export interface TaskStatus {
@@ -20,30 +28,37 @@ export interface TaskStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress?: number;
   result_url?: string;
+  turnaround?: Record<string, string>;
   error?: string;
 }
 
-export const getMotions = async (): Promise<Motion[]> => {
-  const response = await api.get('/motions');
+export const getMotions = async (mode: Mode = 'ai'): Promise<Motion[]> => {
+  const response = await api.get('/motions', { params: { mode } });
   return response.data.motions;
+};
+
+export const generateTurnaround = async (image: File): Promise<TurnaroundResult> => {
+  const formData = new FormData();
+  formData.append('image', image);
+  const response = await api.post('/turnaround', formData, { timeout: 120000 });
+  return response.data;
 };
 
 export const generateSprite = async (
   image: File,
   motionId: string,
   frameCount: number = 8,
-  frameSize: number = 128
+  frameSize: number = 128,
+  mode: Mode = 'ai'
 ): Promise<TaskStatus> => {
   const formData = new FormData();
   formData.append('image', image);
   formData.append('motion_id', motionId);
   formData.append('frame_count', frameCount.toString());
   formData.append('frame_size', frameSize.toString());
+  formData.append('mode', mode);
 
-  // This now returns the full TaskStatus since the API runs synchronously
-  const response = await api.post('/generate', formData, {
-    timeout: 120000, // 2 minute timeout for generation
-  });
+  const response = await api.post('/generate', formData, { timeout: 120000 });
   return response.data;
 };
 
