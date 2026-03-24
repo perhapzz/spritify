@@ -7,12 +7,16 @@ import os
 import asyncio
 import logging
 import traceback
+from PIL import Image as PILImage
 
 from app.services.animator import AnimatorService
 from app.services.sprite_sheet import SpriteSheetService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_DIMENSION = 4096
 
 
 @router.get("/motions")
@@ -55,6 +59,11 @@ async def generate_sprite(
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
+    # Read content and validate file size
+    content = await image.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB")
+
     # Generate task ID
     task_id = str(uuid.uuid4())
 
@@ -64,9 +73,24 @@ async def generate_sprite(
     file_ext = os.path.splitext(image.filename or "image.png")[1]
     input_path = os.path.join(upload_dir, f"{task_id}{file_ext}")
 
-    content = await image.read()
     with open(input_path, "wb") as f:
         f.write(content)
+
+    # Validate image can be opened and check dimensions
+    try:
+        with PILImage.open(input_path) as img:
+            w, h = img.size
+            if w > MAX_DIMENSION or h > MAX_DIMENSION:
+                os.remove(input_path)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image dimensions {w}x{h} exceed maximum {MAX_DIMENSION}x{MAX_DIMENSION}"
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        os.remove(input_path)
+        raise HTTPException(status_code=400, detail="Invalid image file — could not be opened")
 
     # Initialize task
     tasks[task_id] = GenerationStatus(

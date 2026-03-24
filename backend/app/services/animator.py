@@ -1,6 +1,7 @@
 """
 Animator Service - Integrates with AnimatedDrawings to generate animation frames
 """
+import asyncio
 import os
 import tempfile
 import shutil
@@ -49,7 +50,7 @@ MOTION_CONFIGS = {
         "bvh": "examples/bvh/cmu1/jumping_jacks.bvh",
         "start_frame": 0,
         "end_frame": None,
-        "retarget": "examples/config/retarget/cmu1_bvh.yaml",
+        "retarget": "examples/config/retarget/cmu1_pfp.yaml",
     },
     "jesse_dance": {
         "bvh": "examples/bvh/rokoko/jesse_dance.bvh",
@@ -79,8 +80,8 @@ class AnimatorService:
                 input_path, motion_id, frame_count
             )
         except Exception as e:
-            logger.warning(f"AnimatedDrawings failed: {e}, falling back to placeholder")
-            return await self._generate_placeholder_frames(input_path, frame_count)
+            logger.error(f"AnimatedDrawings failed: {e}")
+            raise RuntimeError(f"Animation generation failed: {e}") from e
 
     async def _generate_with_animated_drawings(
         self,
@@ -99,8 +100,10 @@ class AnimatorService:
         char_dir = Path(temp_dir) / "character"
 
         try:
-            # Step 1: Try to create character annotations using MediaPipe
-            success, message = create_character_annotations(input_path, str(char_dir))
+            # Step 1: Try to create character annotations using MediaPipe (CPU-bound)
+            success, message = await asyncio.to_thread(
+                create_character_annotations, input_path, str(char_dir)
+            )
 
             if not success:
                 # MediaPipe failed - use example character for demo
@@ -181,14 +184,17 @@ class AnimatorService:
                 },
                 # Note: Headless rendering with Mesa not available on macOS
                 # Will use GLFW window (works but requires display)
+                "view": {
+                    "USE_MESA": True,
+                },
             }
 
             mvc_cfg_path = char_dir / "mvc_cfg.yaml"
             with open(mvc_cfg_path, "w") as f:
                 yaml.dump(mvc_cfg, f)
 
-            # Step 5: Render animation
-            animated_drawings.render.start(str(mvc_cfg_path))
+            # Step 5: Render animation (CPU-bound, run in thread)
+            await asyncio.to_thread(animated_drawings.render.start, str(mvc_cfg_path))
 
             # Step 6: Extract frames from GIF
             if not output_gif_path.exists():

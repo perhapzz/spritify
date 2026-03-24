@@ -2,11 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including Mesa for headless OpenGL rendering)
 RUN apt-get update && apt-get install -y \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libosmesa6-dev \
+    libgl1-mesa-dev \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PYOPENGL_PLATFORM=osmesa
 
 # Copy requirements first for caching
 COPY requirements.txt .
